@@ -1,0 +1,183 @@
+              +              
+              #              
+             ###             
+            #####            
+            ######           
+           ; #####;          ArchLinux
+          +##.#####          FDE LVM on LUKS install over a UEFI system
+         +##########         
+        #############;       iso:    2017.06.01
+       ###############+      kernel: 4.11.3-1
+      #######   #######      
+    .######;     ;###;`".    
+   .#######;     ;#####.     
+   #########.   .########`   
+  ######'           '######  
+ ;####                 ####; 
+ ##'                     '## 
+#'                         `#
+
+
+# Make sure you've actually booted in UEFI mode by checking if efivars
+# folder was populated. If not, stop now and setup your system to boot
+# in UEFI mode, as you've probably booted in CSM (legacy) mode. Make
+# sure that Secure Boot is DISABLED as well.
+ls /sys/firmware/efi/efivars
+
+# Verify a connection to the web was actually established (dhcp daemon is
+# enabled on boot for wired devices, use wifi-menu for wireless ones).
+ping <whatever address you prefer>
+
+# Use timedatectl to ensure the system clock is accurate, then check for the
+# service status.
+timedatectl set-ntp true
+timedatectl status
+
+# Now the idea is to replicate the following partition scheme, as we want to
+# build LVM on LUKS (you can customize LVM partitions as you prefer later):
+#      +-------------+-------------+-----------+-----------+-----------+
+#      |ESP:         |Boot:        |Volume 1:  |Volume 2:  |Volume 3:  |
+#      |             |             |           |           |           |
+#      |/boot/efi    |/boot        |root       |swap       |home       |
+#      |             |             |           |           |           |
+#      |/dev/sda1    |/dev/sda2    +-----------+-----------+-----------+
+#      |unencrypted  |encrypted    |/dev/sda3 encrypted                |
+#      +-------------+-------------+-----------------------------------+
+# Setup a UEFI-compliant GPT partition scheme as follows (you can use whatever
+# tool you prefer, just make sure it can handle GPT stuff). In order to prevent
+# misalignment warnings when using parted, please use MiB instead of MB.
+parted /dev/sda
+|-- (parted) mklabel gpt                       # Create a GPT partition table.
+|-- (parted) mkpart ESP fat32 1MiB 101MiB      # Create the UEFI partition.
+|-- (parted) set 1 boot on                     # Set UEFI parition as bootable.
+|-- (parted) mkpart primary ext4 101MiB 301MiB # Create the boot partition.
+|-- (parted) mkpart primary ext4 301MiB 100%   # Create the LVM partition.
+|-- (parted) set 3 lvm on                      # Set LVM partition as LVMable.
++-- (parted) quit                              # We're done.
+
+# Format the ESP partition using fat32 filesystem.
+mkfs.fat -F32 /dev/sda1
+
+# Checkout the available hash and crypt algorithms, and choose the one that
+# suits you system better.
+cryptsetup benchmark
+
+# Encrypt the LVM partition using LUKS (BEWARE: this is a one liner).
+cryptsetup luksFormat --hash=<chosen hash>
+                      --cipher=<chosen cipher>
+                      --key-size=<chosen key size>
+                      --verify-passphrase
+                      /dev/sda3
+
+# Open the encrypted LVM partition.
+cryptsetup open /dev/sda3 cryptlvm
+
+# Create a physical volume on top of the opened LUKS container, then add it
+# to a volume group (you can name the group as you prefer).
+pvcreate /dev/mapper/cryptlvm
+vgcreate <volume name> /dev/mapper/cryptlvm
+
+# Create all the logical volumes on such group.
+lvcreate -L <swap size>G <volume name> -n swap
+lvcreate -L <root size>G <volume name> -n root
+lvcreate -l 100%FREE <volume name> -n home
+
+# Format logical volumes.
+mkfs.ext4 /dev/mapper/<volume name>-root
+mkfs.ext4 /dev/mapper/<volume name>-home
+mkswap /dev/mapper/<volume name>-swap
+
+# Mount filesystems. LVM part is done.
+mount /dev/mapper/<volume name>-root /mnt
+mkdir /mnt/home
+mount /dev/mapper/<volume name>-home /mnt/home
+swapon /dev/mapper/<volume name>-swap
+
+# Encrypt the boot partition using LUKS (BEWARE: this is a one liner).
+cryptsetup luksFormat --hash=<chosen hash>
+                      --cipher=<chosen cipher>
+                      --key-size=<chosen key size>
+                      --verify-passphrase
+                      /dev/sda2
+
+# Open the encrypted boot partition.
+cryptsetup open /dev/sda2 cryptboot
+
+# Format the partition using an eligible filesystem for the bootloader,
+# then mount it.
+mkfs.ext4 /dev/mapper/cryptboot
+mkdir /mnt/boot
+mount /dev/mapper/cryptboot /mnt/boot
+
+# Create a mount point for the EFI system partition at /mnt/boot/efi (for
+# compatibility with grub-install), then mount it.
+mkdir /mnt/boot/efi
+mount /dev/sda1 /mnt/boot/efi
+
+# Install base system using pacstrap.
+pacstrap /mnt base base-devel
+
+# Generate fstab using UUIDs then check its content for errors.
+genfstab -U /mnt > /mnt/etc/fstab
+
+# Chroot to current install.
+arch-chroot /mnt
+
+# Add the encrypted partitions to crypttab file. Use blkid to list UUIDs.
+--> /etc/crypttab
+    cryptboot UUID=</dev/sda2 UUID> none luks
+    cryptlvm  UUID=</dev/sda3 UUID> none luks
+
+# Setup time zone and hardware clock.
+ln -sf /usr/share/zoneinfo/<region>/<city> /etc/localtime
+hwclock --systohc --utc
+
+# Uncomment the locale you want to be generated from /etc/locale.gen, then
+# generate locale and set the LANG variable in /etc/locale.conf accoringly.
+# You can set the keymap for your current language as well.
+locale-gen
+echo LANG=<chosen locale> > /etc/locale.conf
+echo KEYMAP=<chosen keymap> > /etc/vconsole.conf
+
+# Create hostname and consider adding the respective entry to file hosts.
+echo <chosen hostname> > /etc/hostname
+--> /etc/hosts
+    127.0.0.1   localhost.localdomain   localhost
+    ::1         localhost.localdomain   localhost
+    127.0.1.1   <chosen hostname>.localdomain   <chosen hostname>
+
+# Configure mkinitcpio by adding encrypt and lvm2 hooks before filesystems.
+# Then regenerate the ramfs.
+--> /etc/mkinitcpio.conf
+    HOOKS="... block encrypt lvm2 ... filesystems ..."
+mkinitcpio -p linux
+
+# Update the root password.
+passwd
+
+# If you have an Intel CPU, it is recommended to install the intel-ucode
+# package to enable microcode updates. Also, install GRUB bootloader and
+# efibootmgr for UEFI compatibility.
+pacman -S intel-ucode grub efibootmgr
+
+# Configure GRUB to recognize the LUKS encrypted boot partition and unlock
+# the root LVM one at boot.
+--> /etc/default/grub
+    GRUB_CMDLINE_LINUX="... cryptdevice=UUID=</dev/sda3 UUID>:cryptlvm ..."
+    GRUB_ENABLE_CRYPTODISK=y
+
+# Install GRUB to the mounted ESP then generate a config file for it
+# (BEWARE: the first command is a one liner). It may happen that a warning
+# about lvmetad is thrown at you: don't panic, as this happens due to /run
+# not being available in chroot environment. Just ignore it.
+# https://wiki.archlinux.org/index.php/GRUB#Warning_when_installing_in_chroot
+grub-install --target=x86_64-efi
+             --efi-directory=/boot/efi
+             --bootloader-id=<chosen entry name>
+             --recheck
+grub-mkconfig -o /boot/grub/grub.cfg
+
+# Installation is finished: exit chroot, unmount all drives then reboot.
+exit
+umount -R /mnt
+reboot

@@ -1,0 +1,166 @@
+              +              
+              #              
+             ###             
+            #####            
+            ######           
+           ; #####;          ArchLinux
+          +##.#####          FDE BTRFS on LUKS install over a UEFI system
+         +##########         
+        #############;       iso:    2017.06.01
+       ###############+      kernel: 4.11.3-1
+      #######   #######      
+    .######;     ;###;`".    
+   .#######;     ;#####.     
+   #########.   .########`   
+  ######'           '######  
+ ;####                 ####; 
+ ##'                     '## 
+#'                         `#
+
+
+# Make sure you've actually booted in UEFI mode by checking if efivars
+# folder was populated. If not, stop now and setup your system to boot
+# in UEFI mode, as you've probably booted in CSM (legacy) mode. Make
+# sure that Secure Boot is DISABLED as well.
+ls /sys/firmware/efi/efivars
+
+# Verify a connection to the web was actually established (dhcp daemon is
+# enabled on boot for wired devices, use wifi-menu for wireless ones).
+ping <whatever address you prefer>
+
+# Use timedatectl to ensure the system clock is accurate, then check for the
+# service status.
+timedatectl set-ntp true
+timedatectl status
+
+# Now the idea is to replicate the following partition scheme, as we want to
+# have a BTRFS partition secured within a LUKS container (due to BTRFS not
+# having swap file support as of now, the guide will not cover such issue;
+# feel free to add a third LUKS encrypted swap parition if youd'like to):
+#               +-------------+---------------------------+
+#               |ESP:         |BTRFS:                     |
+#               |             |    subvol @     --> \     |
+#               |/boot/efi    |    subvol @boot --> \boot |
+#               |             |    subvol @home --> \home |
+#               |/dev/sda1    +---------------------------+
+#               |unencrypted  |/dev/sda2 encrypted        |
+#               +-------------+-------------+-------------+
+# Setup a UEFI-compliant GPT partition scheme as follows (you can use whatever
+# tool you prefer, just make sure it can handle GPT stuff). In order to prevent
+# misalignment warnings when using parted, please use MiB instead of MB.
+parted /dev/sda
+|-- (parted) mklabel gpt                       # Create a GPT partition table.
+|-- (parted) mkpart ESP fat32 1MiB 101MiB      # Create the UEFI partition.
+|-- (parted) set 1 boot on                     # Set UEFI parition as bootable.
+|-- (parted) mkpart primary btrfs 101MiB 100%  # Create the BTRFS partition.
++-- (parted) quit                              # We're done.
+
+# Format the ESP partition using fat32 filesystem.
+mkfs.fat -F32 /dev/sda1
+
+# Checkout the available hash and crypt algorithms, and choose the one that
+# suits you system better.
+cryptsetup benchmark
+
+# Encrypt the BTRFS partition using LUKS (BEWARE: this is a one liner).
+cryptsetup luksFormat --hash=<chosen hash>
+                      --cipher=<chosen cipher>
+                      --key-size=<chosen key size>
+                      --verify-passphrase
+                      /dev/sda2
+
+# Open the encrypted BTRFS partition.
+cryptsetup open /dev/sda2 cryptbtrfs
+
+# Format the encrypted parition then mount it to /mnt.
+mkfs.btrfs /dev/mapper/cryptbtrfs
+mount /dev/mapper/cryptbtrfs /mnt
+
+# As BTRFS handles subvolumes as directories, use /mnt prefix when creating the
+# subvolumes you'd like to. Finally unmount the BTRFS parition.
+btrfs subvolume create /mnt/@
+btrfs subvolume create /mnt/@boot
+btrfs subvolume create /mnt/@home
+umount /mnt
+
+# Mount the subvolumes you've created to their respective mount points. Checkout
+# the wiki for the best mounting options, as here just basic ones are provided.
+mount -o compress=lzo,subvol=@ /dev/mapper/cryptbtrfs /mnt
+mkdir /mnt/boot
+mount -o compress=lzo,subvol=@boot /dev/mapper/cryptbtrfs /mnt/boot
+mkdir /mnt/home
+mount -o compress=lzo,subvol=@home /dev/mapper/cryptbtrfs /mnt/home
+
+# Create a mount point for the EFI system partition at /mnt/boot/efi (for
+# compatibility with grub-install), then mount it.
+mkdir /mnt/boot/efi
+mount /dev/sda1 /mnt/boot/efi
+
+# Install base system using pacstrap. Include btrfs-progs.
+pacstrap /mnt base base-devel btrfs-progs
+
+# Generate fstab using UUIDs then check its content for errors.
+genfstab -U /mnt > /mnt/etc/fstab
+
+# Chroot to current install.
+arch-chroot /mnt
+
+# Add the encrypted BTFS partition to crypttab file. Use blkid to list UUIDs.
+--> /etc/crypttab
+    cryptbtrfs UUID=</dev/sda2 UUID> none luks
+
+# Setup time zone and hardware clock.
+ln -sf /usr/share/zoneinfo/<region>/<city> /etc/localtime
+hwclock --systohc --utc
+
+# Uncomment the locale you want to be generated from /etc/locale.gen, then
+# generate locale and set the LANG variable in /etc/locale.conf accoringly.
+# You can set the keymap for your current language as well.
+locale-gen
+echo LANG=<chosen locale> > /etc/locale.conf
+echo KEYMAP=<chosen keymap> > /etc/vconsole.conf
+
+# Create hostname and consider adding the respective entry to file hosts.
+echo <chosen hostname> > /etc/hostname
+--> /etc/hosts
+    127.0.0.1   localhost.localdomain   localhost
+    ::1         localhost.localdomain   localhost
+    127.0.1.1   <chosen hostname>.localdomain   <chosen hostname>
+
+# Configure mkinitcpio by adding encrypt and btrfs hooks before filesystems.
+# Add btrfs executable to binaries to be able to use btrfs-check if necessary.
+# Then regenerate the ramfs.
+--> /etc/mkinitcpio.conf
+    BINARIES="/usr/bin/btrfs"
+    HOOKS="... block encrypt btrfs ... filesystems ..."
+mkinitcpio -p linux
+
+# Update the root password.
+passwd
+
+# If you have an Intel CPU, it is recommended to install the intel-ucode
+# package to enable microcode updates. Also, install GRUB bootloader and
+# efibootmgr for UEFI compatibility.
+pacman -S intel-ucode grub efibootmgr
+
+# Configure GRUB to recognize the LUKS encrypted boot partition and unlock
+# the root LVM one at boot.
+--> /etc/default/grub
+    GRUB_CMDLINE_LINUX="... cryptdevice=UUID=</dev/sda3 UUID>:cryptbtrfs ..."
+    GRUB_ENABLE_CRYPTODISK=y
+
+# Install GRUB to the mounted ESP then generate a config file for it
+# (BEWARE: the first command is a one liner). It may happen that a warning
+# about lvmetad is thrown at you: don't panic, as this happens due to /run
+# not being available in chroot environment. Just ignore it.
+# https://wiki.archlinux.org/index.php/GRUB#Warning_when_installing_in_chroot
+grub-install --target=x86_64-efi
+             --efi-directory=/boot/efi
+             --bootloader-id=<chosen entry name>
+             --recheck
+grub-mkconfig -o /boot/grub/grub.cfg
+
+# Installation is finished: exit chroot, unmount all drives then reboot.
+exit
+umount -R /mnt
+reboot
