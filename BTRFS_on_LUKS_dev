@@ -146,7 +146,7 @@ pacman -S intel-ucode grub efibootmgr
 # Configure GRUB to recognize the LUKS encrypted boot partition and unlock
 # the root LVM one at boot.
 --> /etc/default/grub
-    GRUB_CMDLINE_LINUX="... cryptdevice=UUID=</dev/sda3 UUID>:cryptbtrfs ..."
+    GRUB_CMDLINE_LINUX="... cryptdevice=UUID=</dev/sda2 UUID>:cryptbtrfs ..."
     GRUB_ENABLE_CRYPTODISK=y
 
 # Install GRUB to the mounted ESP then generate a config file for it
