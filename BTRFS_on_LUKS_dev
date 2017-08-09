@@ -6,8 +6,8 @@
            ; #####;          ArchLinux
           +##.#####          FDE BTRFS on LUKS install over a UEFI system
          +##########         
-        #############;       iso:    2017.06.01
-       ###############+      kernel: 4.11.3-1
+        #############;       iso:    2017.08.01
+       ###############+      kernel: 4.12.3-1
       #######   #######      
     .######;     ;###;`".    
    .#######;     ;#####.     
@@ -32,6 +32,10 @@ ping <whatever address you prefer>
 # service status.
 timedatectl set-ntp true
 timedatectl status
+
+# Use lsblk to list all your drives and chose the one you want to install
+# onto: from further on, the whole guide will use drive sda as an example.
+lsblk
 
 # Now the idea is to replicate the following partition scheme, as we want to
 # have a BTRFS partition secured within a LUKS container (due to BTRFS not
@@ -76,7 +80,7 @@ cryptsetup open /dev/sda2 cryptbtrfs
 mkfs.btrfs /dev/mapper/cryptbtrfs
 mount /dev/mapper/cryptbtrfs /mnt
 
-# As BTRFS handles subvolumes as directories, use /mnt prefix when creating the
+# Since BTRFS handles subvolumes as directories, use /mnt prefix when creating the
 # subvolumes you'd like to. Finally unmount the BTRFS parition.
 btrfs subvolume create /mnt/@
 btrfs subvolume create /mnt/@boot
@@ -105,10 +109,6 @@ genfstab -U /mnt > /mnt/etc/fstab
 # Chroot to current install.
 arch-chroot /mnt
 
-# Add the encrypted BTFS partition to crypttab file. Use blkid to list UUIDs.
---> /etc/crypttab
-    cryptbtrfs UUID=</dev/sda2 UUID> none luks
-
 # Setup time zone and hardware clock.
 ln -sf /usr/share/zoneinfo/<region>/<city> /etc/localtime
 hwclock --systohc --utc
@@ -127,12 +127,18 @@ echo <chosen hostname> > /etc/hostname
     ::1         localhost.localdomain   localhost
     127.0.1.1   <chosen hostname>.localdomain   <chosen hostname>
 
-# Configure mkinitcpio by adding encrypt and btrfs hooks before filesystems.
-# Add btrfs executable to binaries to be able to use btrfs-check if necessary.
+# Add the encrypted BTFS partition to crypttab file. Use blkid to list UUIDs.
+--> /etc/crypttab
+    cryptbtrfs UUID=</dev/sda2 UUID> none luks
+
+# Configure mkinitcpio by adding encrypt hook before filesystems and after block.
+# If you're configuring an image that does not use udev hook, then add btrfs
+# after encrypt, but still before filesystems. To be able to use btrfs-check
+# in case of emergency shell drop, add /usr/bin/btrfs to the binaries.
 # Then regenerate the ramfs.
 --> /etc/mkinitcpio.conf
     BINARIES="/usr/bin/btrfs"
-    HOOKS="... block encrypt btrfs ... filesystems ..."
+    HOOKS="... block encrypt filesystems ..."
 mkinitcpio -p linux
 
 # Update the root password.
@@ -150,10 +156,7 @@ pacman -S intel-ucode grub efibootmgr
     GRUB_ENABLE_CRYPTODISK=y
 
 # Install GRUB to the mounted ESP then generate a config file for it
-# (BEWARE: the first command is a one liner). It may happen that a warning
-# about lvmetad is thrown at you: don't panic, as this happens due to /run
-# not being available in chroot environment. Just ignore it.
-# https://wiki.archlinux.org/index.php/GRUB#Warning_when_installing_in_chroot
+# (BEWARE: the first command is a one liner).
 grub-install --target=x86_64-efi
              --efi-directory=/boot/efi
              --bootloader-id=<chosen entry name>

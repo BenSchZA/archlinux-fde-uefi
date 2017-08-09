@@ -33,6 +33,10 @@ ping <whatever address you prefer>
 timedatectl set-ntp true
 timedatectl status
 
+# Use lsblk to list all your drives and chose the one you want to install
+# onto: from further on, the whole guide will use drive sda as an example.
+lsblk
+
 # Now the idea is to replicate the following partition scheme, as we want to
 # build LVM on LUKS (you can customize LVM partitions as you prefer later):
 #      +-------------+-------------+-----------+-----------+-----------+
@@ -123,11 +127,6 @@ genfstab -U /mnt > /mnt/etc/fstab
 # Chroot to current install.
 arch-chroot /mnt
 
-# Add the encrypted partitions to crypttab file. Use blkid to list UUIDs.
---> /etc/crypttab
-    cryptboot UUID=</dev/sda2 UUID> none luks
-    cryptlvm  UUID=</dev/sda3 UUID> none luks
-
 # Setup time zone and hardware clock.
 ln -sf /usr/share/zoneinfo/<region>/<city> /etc/localtime
 hwclock --systohc --utc
@@ -145,6 +144,11 @@ echo <chosen hostname> > /etc/hostname
     127.0.0.1   localhost.localdomain   localhost
     ::1         localhost.localdomain   localhost
     127.0.1.1   <chosen hostname>.localdomain   <chosen hostname>
+
+# Add the encrypted partitions to crypttab file. Use blkid to list UUIDs.
+--> /etc/crypttab
+    cryptboot UUID=</dev/sda2 UUID> none luks
+    cryptlvm  UUID=</dev/sda3 UUID> none luks
 
 # Configure mkinitcpio by adding encrypt and lvm2 hooks before filesystems.
 # Then regenerate the ramfs.
