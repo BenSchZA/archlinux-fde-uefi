@@ -7,7 +7,7 @@
           +##.#####          FDE BTRFS on LUKS install over a UEFI system
          +##########         
         #############;       iso:    2017.08.01
-       ###############+      kernel: 4.12.3-1
+       ###############+      kernel: 4.12.6-1
       #######   #######      
     .######;     ;###;`".    
    .#######;     ;#####.     
@@ -105,6 +105,7 @@ pacstrap /mnt base base-devel btrfs-progs
 
 # Generate fstab using UUIDs then check its content for errors.
 genfstab -U /mnt > /mnt/etc/fstab
+cat /mnt/etc/fstab | less
 
 # Chroot to current install.
 arch-chroot /mnt
@@ -120,7 +121,7 @@ locale-gen
 echo LANG=<chosen locale> > /etc/locale.conf
 echo KEYMAP=<chosen keymap> > /etc/vconsole.conf
 
-# Create hostname and consider adding the respective entry to file hosts.
+# Choose hostname and consider adding the respective entry to hosts file.
 echo <chosen hostname> > /etc/hostname
 --> /etc/hosts
     127.0.0.1   localhost.localdomain   localhost

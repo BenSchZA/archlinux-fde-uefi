@@ -6,8 +6,8 @@
            ; #####;          ArchLinux
           +##.#####          FDE LVM on LUKS install over a UEFI system
          +##########         
-        #############;       iso:    2017.06.01
-       ###############+      kernel: 4.11.3-1
+        #############;       iso:    2017.08.01
+       ###############+      kernel: 4.12.6-1
       #######   #######      
     .######;     ;###;`".    
    .#######;     ;#####.     
@@ -40,10 +40,10 @@ lsblk
 # Now the idea is to replicate the following partition scheme, as we want to
 # build LVM on LUKS (you can customize LVM partitions as you prefer later):
 #      +-------------+-------------+-----------+-----------+-----------+
-#      |ESP:         |Boot:        |Volume 1:  |Volume 2:  |Volume 3:  |
-#      |             |             |           |           |           |
-#      |/boot/efi    |/boot        |root       |swap       |home       |
-#      |             |             |           |           |           |
+#      |ESP:         |Boot:        |                LVM                |
+#      |             |             +-----------+-----------+-----------+
+#      |/boot/efi    |/boot        |Volume 1:  |Volume 2:  |Volume 3:  |
+#      |             |             |swap       |root       |home       |
 #      |/dev/sda1    |/dev/sda2    +-----------+-----------+-----------+
 #      |unencrypted  |encrypted    |/dev/sda3 encrypted                |
 #      +-------------+-------------+-----------------------------------+
@@ -123,6 +123,7 @@ pacstrap /mnt base base-devel
 
 # Generate fstab using UUIDs then check its content for errors.
 genfstab -U /mnt > /mnt/etc/fstab
+cat /mnt/etc/fstab | less
 
 # Chroot to current install.
 arch-chroot /mnt
@@ -138,7 +139,7 @@ locale-gen
 echo LANG=<chosen locale> > /etc/locale.conf
 echo KEYMAP=<chosen keymap> > /etc/vconsole.conf
 
-# Create hostname and consider adding the respective entry to file hosts.
+# Choose hostname and consider adding the respective entry to hosts file.
 echo <chosen hostname> > /etc/hostname
 --> /etc/hosts
     127.0.0.1   localhost.localdomain   localhost
