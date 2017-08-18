@@ -63,15 +63,18 @@ parted /dev/sda
 mkfs.fat -F32 /dev/sda1
 
 # Checkout the available hash and crypt algorithms, and choose the one that
-# suits you system better.
+# suits you system better. Please note that the cryptsetup defaults are
+# absolutely sane, therefore this passage is not necessary unless you KNOW
+# what you're doing.
 cryptsetup benchmark
 
-# Encrypt the LVM partition using LUKS (BEWARE: this is a one liner).
-cryptsetup luksFormat --hash=<chosen hash>
-                      --cipher=<chosen cipher>
-                      --key-size=<chosen key size>
-                      --verify-passphrase
-                      /dev/sda3
+# Encrypt the LVM partition using LUKS. You can specify hash, cipher and key
+# size to use with the --hash=<chosen hash>, --cipher=<chosen cipher> and
+# --key-size=<chosen key size> options. Again, please note that the cryptsetup
+# defaults are absolutely sane, therefore using those options is not necessary
+# unless you KNOW what you're doing.
+# https://wiki.archlinux.org/index.php/Dm-crypt/Device_encryption#Encryption_options_for_LUKS_mode
+cryptsetup luksFormat /dev/sda3
 
 # Open the encrypted LVM partition.
 cryptsetup open /dev/sda3 cryptlvm
@@ -97,12 +100,13 @@ mkdir /mnt/home
 mount /dev/mapper/<volume name>-home /mnt/home
 swapon /dev/mapper/<volume name>-swap
 
-# Encrypt the boot partition using LUKS (BEWARE: this is a one liner).
-cryptsetup luksFormat --hash=<chosen hash>
-                      --cipher=<chosen cipher>
-                      --key-size=<chosen key size>
-                      --verify-passphrase
-                      /dev/sda2
+# Encrypt the boot partition using LUKS. You can specify hash, cipher and key
+# size to use with the --hash=<chosen hash>, --cipher=<chosen cipher> and
+# --key-size=<chosen key size> options. Again, please note that the cryptsetup
+# defaults are absolutely sane, therefore using those options is not necessary
+# unless you KNOW what you're doing.
+# https://wiki.archlinux.org/index.php/Dm-crypt/Device_encryption#Encryption_options_for_LUKS_mode
+cryptsetup luksFormat /dev/sda2
 
 # Open the encrypted boot partition.
 cryptsetup open /dev/sda2 cryptboot
@@ -152,7 +156,10 @@ echo <chosen hostname> > /etc/hostname
     cryptlvm  UUID=</dev/sda3 UUID> none luks
 
 # Configure mkinitcpio by adding encrypt and lvm2 hooks before filesystems.
-# Then regenerate the ramfs.
+# Then regenerate the ramfs. If you'd like to skip multiple password entries
+# during the boot process, keyfiles to unlock encrypted partitions can be
+# embedded in the initramfs. Please follow this section of the wiki to do so:
+# https://wiki.archlinux.org/index.php/Dm-crypt/Device_encryption#With_a_keyfile_embedded_in_the_initramfs
 --> /etc/mkinitcpio.conf
     HOOKS="... block encrypt lvm2 ... filesystems ..."
 mkinitcpio -p linux

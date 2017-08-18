@@ -63,15 +63,18 @@ parted /dev/sda
 mkfs.fat -F32 /dev/sda1
 
 # Checkout the available hash and crypt algorithms, and choose the one that
-# suits you system better.
+# suits you system better. Please note that the cryptsetup defaults are
+# absolutely sane, therefore this passage is not necessary unless you KNOW
+# what you're doing.
 cryptsetup benchmark
 
-# Encrypt the BTRFS partition using LUKS (BEWARE: this is a one liner).
-cryptsetup luksFormat --hash=<chosen hash>
-                      --cipher=<chosen cipher>
-                      --key-size=<chosen key size>
-                      --verify-passphrase
-                      /dev/sda2
+# Encrypt the BTRFS partition using LUKS. You can specify hash, cipher and key
+# size to use with the --hash=<chosen hash>, --cipher=<chosen cipher> and
+# --key-size=<chosen key size> options. Again, please note that the cryptsetup
+# defaults are absolutely sane, therefore using those options is not necessary
+# unless you KNOW what you're doing.
+# https://wiki.archlinux.org/index.php/Dm-crypt/Device_encryption#Encryption_options_for_LUKS_mode
+cryptsetup luksFormat /dev/sda2
 
 # Open the encrypted BTRFS partition.
 cryptsetup open /dev/sda2 cryptbtrfs
@@ -136,7 +139,10 @@ echo <chosen hostname> > /etc/hostname
 # If you're configuring an image that does not use udev hook, then add btrfs
 # after encrypt, but still before filesystems. To be able to use btrfs-check
 # in case of emergency shell drop, add /usr/bin/btrfs to the binaries.
-# Then regenerate the ramfs.
+# Then regenerate the ramfs. If you'd like to skip multiple password entries
+# during the boot process, keyfiles to unlock encrypted partitions can be
+# embedded in the initramfs. Please follow this section of the wiki to do so:
+# https://wiki.archlinux.org/index.php/Dm-crypt/Device_encryption#With_a_keyfile_embedded_in_the_initramfs
 --> /etc/mkinitcpio.conf
     BINARIES="/usr/bin/btrfs"
     HOOKS="... block encrypt filesystems ..."
